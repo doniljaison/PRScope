@@ -1,0 +1,59 @@
+[project]
+name = "prscope"
+version = "0.1.0"
+description = "AI-powered GitHub PR review engine"
+requires-python = ">=3.11"
+
+dependencies = [
+    # ── Core API ──────────────────────────────────────────────────────────────
+    "fastapi>=0.111.0",           # The web framework
+    "uvicorn[standard]>=0.29.0",  # ASGI server that runs FastAPI
+    "python-multipart>=0.0.9",    # Required for form data / file uploads
+
+    # ── Config ────────────────────────────────────────────────────────────────
+    "pydantic>=2.7.0",            # Data validation (FastAPI uses this everywhere)
+    "pydantic-settings>=2.3.0",   # Load settings from .env file
+
+    # ── Database ──────────────────────────────────────────────────────────────
+    "sqlalchemy[asyncio]>=2.0.30", # ORM — maps Python classes to DB tables
+    "asyncpg>=0.29.0",             # Async PostgreSQL driver
+    "alembic>=1.13.1",             # DB migration tool (version-control for schema)
+
+    # ── Cache & Queue ─────────────────────────────────────────────────────────
+    "redis[hiredis]>=5.0.4",      # Redis client (hiredis = faster C parser)
+    "celery>=5.4.0",              # Background task queue
+
+    # ── HTTP Client ───────────────────────────────────────────────────────────
+    "httpx>=0.27.0",              # Async HTTP client (for GitHub API, LLM API)
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    "python-jose[cryptography]>=3.3.0",  # JWT tokens
+    "passlib[bcrypt]>=1.7.4",            # Password hashing
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    "structlog>=24.1.0",          # Structured JSON logging (what prod systems use)
+
+    # ── WebSockets ────────────────────────────────────────────────────────────
+    "websockets>=12.0",           # WebSocket support for FastAPI
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.7",
+    "httpx>=0.27.0",         # Also used for testing FastAPI via TestClient
+    "ruff>=0.4.7",           # Extremely fast linter + formatter (replaces flake8+black)
+]
+
+# ── Ruff linter/formatter config ──────────────────────────────────────────────
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]   # E=pycodestyle, F=pyflakes, I=isort
+
+# ── Pytest config ─────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"       # All async tests run without @pytest.mark.asyncio
+testpaths = ["tests"]

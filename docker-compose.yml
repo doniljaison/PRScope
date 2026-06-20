@@ -1,0 +1,69 @@
+services:
+
+  # ─── FastAPI application ───────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"      # localhost:8000 → container:8000
+    env_file: .env
+    volumes:
+      - ./app:/app/app   # Mount source code — changes reload instantly (no rebuild)
+    depends_on:
+      db:
+        condition: service_healthy   # Don't start until Postgres is ready
+      redis:
+        condition: service_healthy   # Don't start until Redis is ready
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ─── Celery background worker ──────────────────────────────────────────────
+  # Uncomment this block in Week 2 when you set up Celery
+  # worker:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile
+  #   env_file: .env
+  #   volumes:
+  #     - ./app:/app/app
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   command: celery -A app.workers.celery_app worker --loglevel=info -Q default,high_priority
+
+  # ─── PostgreSQL database ───────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"      # Exposed so you can connect with TablePlus/pgAdmin locally
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # Data persists across restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"      # Exposed so you can inspect with redis-cli locally
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+# Named volumes — Docker manages where these live on your host
+volumes:
+  postgres_data:
+  redis_data:
