@@ -47,15 +47,10 @@ class Settings(BaseSettings):
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 
-    @computed_field  # type: ignore[misc]
-    @property
-    def DATABASE_URL_SYNC(self) -> str:
-        """Sync URL used by Alembic (migrations can't use async)."""
-        return (
-            f"postgresql+psycopg2://"
-            f"{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        )
+    # NOTE: We don't define a separate sync DATABASE_URL_SYNC.
+    # Alembic migrations also run async (via async_engine_from_config in
+    # alembic/env.py) — using the SAME asyncpg URL as the app itself.
+    # One driver, one URL, one less thing that can drift out of sync.
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     REDIS_HOST: str = "redis"
