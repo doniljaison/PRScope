@@ -18,8 +18,11 @@ Why is this in a router and not in main.py?
 import time
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_db
 from app.config import settings
 
 router = APIRouter()
@@ -46,14 +49,19 @@ async def health_check():
 
 
 @router.get("/health/detailed")
-async def detailed_health_check():
+async def detailed_health_check(db: AsyncSession = Depends(get_db)):
     """
-    Detailed health check — actually connects to Redis.
-    (DB check will be added in Day 3 once SQLAlchemy is set up.)
+    Detailed health check — actually connects to Redis AND Postgres.
 
-    If Redis is down, this returns {"status": "degraded"}.
-    The HTTP status code is still 200 — that's a design choice.
-    Some teams use 503 for degraded state. Both are valid.
+    Notice `db: AsyncSession = Depends(get_db)` in the signature. FastAPI
+    sees `Depends(get_db)`, calls that generator function, runs everything
+    in get_db() up to its `yield`, and hands US the yielded session. When
+    this route function returns, FastAPI resumes get_db() PAST the yield —
+    that's where the commit/rollback/close logic lives (see app/api/deps.py).
+
+    If either service is down, this returns {"status": "degraded"} but
+    still with a 200 HTTP status. That's a deliberate choice — some teams
+    prefer a 503 here instead. Both are defensible; just be consistent.
     """
     checks: dict[str, str] = {}
     overall_status = "ok"
@@ -68,8 +76,17 @@ async def detailed_health_check():
         checks["redis"] = f"error: {type(e).__name__}"
         overall_status = "degraded"
 
-    # ── DB check (placeholder — filled in Day 3) ──────────────────────────────
-    checks["database"] = "not_configured_yet"
+    # ── Database check ────────────────────────────────────────────────────────
+    try:
+        # text("SELECT 1") — the simplest possible query. We don't care about
+        # the result, only that the round trip succeeded. Using `text()`
+        # (not raw string interpolation) is required by SQLAlchemy 2.0 to
+        # mark this as a literal SQL expression rather than a typo.
+        await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {type(e).__name__}"
+        overall_status = "degraded"
 
     return {
         "status": overall_status,
