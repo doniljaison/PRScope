@@ -1,26 +1,18 @@
 """
 test_health.py — Tests for the health check endpoints.
 
-This is Day 1's test file. It's simple on purpose.
-As the project grows, tests get more complex (mocking external services, etc.)
-
 Run with:
   docker compose exec api pytest tests/ -v
 """
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-
-from app.main import app
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_health_returns_ok():
+async def test_health_returns_ok(client: AsyncClient):
     """Basic health check should always return status: ok."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.get("/api/v1/health")
+    response = await client.get("/api/v1/health")
 
     assert response.status_code == 200
     data = response.json()
@@ -30,12 +22,25 @@ async def test_health_returns_ok():
 
 
 @pytest.mark.asyncio
-async def test_root_endpoint():
+async def test_detailed_health_checks_database_and_redis(client: AsyncClient):
+    """
+    Detailed health check should report BOTH services as ok, since this
+    test runs inside the docker compose network where db and redis are
+    both real, running containers.
+    """
+    response = await client.get("/api/v1/health/detailed")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["checks"]["database"] == "ok"
+    assert data["checks"]["redis"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_root_endpoint(client: AsyncClient):
     """Root endpoint should return app name and docs URL."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.get("/")
+    response = await client.get("/")
 
     assert response.status_code == 200
     data = response.json()
