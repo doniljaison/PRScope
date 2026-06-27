@@ -117,7 +117,8 @@ curl http://localhost:8000/api/v1/health
 # → {"status": "ok", "app": "PRScope", ...}
 
 curl http://localhost:8000/api/v1/health/detailed
-# → checks DB + Redis connectivity
+# → checks DB + Redis connectivity, e.g.:
+# {"status":"ok","checks":{"redis":"ok","database":"ok"}, ...}
 ```
 
 ---
@@ -139,6 +140,9 @@ docker compose exec redis redis-cli
 
 # Run a migration
 docker compose exec api alembic upgrade head
+
+# Create a new migration after changing/adding a model
+docker compose exec api alembic revision --autogenerate -m "describe the change"
 ```
 
 ---

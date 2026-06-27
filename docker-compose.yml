@@ -9,7 +9,8 @@ services:
       - "8000:8000"      # localhost:8000 → container:8000
     env_file: .env
     volumes:
-      - ./app:/app/app   # Mount source code — changes reload instantly (no rebuild)
+      - ./app:/app/app       # Mount source code — changes reload instantly (no rebuild)
+      - ./alembic:/app/alembic  # Mount alembic — migrations persist to host
     depends_on:
       db:
         condition: service_healthy   # Don't start until Postgres is ready

@@ -76,3 +76,45 @@ The `COPY . .` at the end overwrites the empty stub with the real `app/__init__.
 **What I learned:**
 Editable installs (`-e`) require a valid package structure at install time — Docker layer caching strategies must account for this by creating a minimal stub before the install step.
 
+---
+
+### Bug #2: `RuntimeError: Task got Future attached to a different loop` in async DB tests
+
+**Date:** 2026-06-20
+**Layer affected:** Testing / DB / Async
+
+**Symptom:**
+`test_create_user` and `test_email_must_be_unique` fail with:
+```
+RuntimeError: Task <Task pending name='Task-38' coro=<test_email_must_be_unique()>>
+got Future <Future pending> attached to a different loop
+```
+The health tests (which don't use `db_session`) pass fine. Only the model tests that directly use the `db_session` fixture fail.
+
+**Root cause:**
+The `AsyncSessionLocal` factory in `app/database.py` is module-level. When it's first imported, the underlying `create_async_engine` binds its connection pool to whatever asyncio event loop is running at that time (the app's event loop during startup).
+
+When `pytest-asyncio` runs tests, it creates its OWN event loop per test function. The `db_session` fixture was using `AsyncSessionLocal` from `app/database.py`, which had a connection pool bound to a DIFFERENT loop. `asyncpg` then tries to use a connection from that pool on the test's loop → `RuntimeError`.
+
+This is the classic async Python "event loop mismatch" bug. It's essentially the async equivalent of threading bugs — resource created on one loop, used on another.
+
+**Failed approaches:**
+- Initially tried reusing `AsyncSessionLocal` directly from `app.database` — this was the approach from the original conftest, and it fails due to the loop mismatch.
+
+**Fix:**
+Create a test-scoped engine and session factory inside the `db_session` fixture, so the connection pool is always created on the test's event loop:
+```python
+@pytest.fixture
+async def db_session():
+    test_engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    TestSessionLocal = async_sessionmaker(bind=test_engine, class_=AsyncSession, ...)
+    async with TestSessionLocal() as session:
+        yield session
+        await session.rollback()
+    await test_engine.dispose()
+```
+
+The `dispose()` call is critical — without it, connections leak between tests.
+
+**What I learned:**
+In async Python, connection pools are bound to the event loop they're created on. Tests run on different loops than the app, so test fixtures must create their own engine/pool rather than reusing the app's module-level one.
