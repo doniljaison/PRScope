@@ -11,6 +11,7 @@ services:
     volumes:
       - ./app:/app/app       # Mount source code — changes reload instantly (no rebuild)
       - ./alembic:/app/alembic  # Mount alembic — migrations persist to host
+      - ./tests:/app/tests   # Mount tests — so pytest sees new tests instantly
     depends_on:
       db:
         condition: service_healthy   # Don't start until Postgres is ready
