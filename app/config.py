@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""
     GITHUB_WEBHOOK_SECRET: str = ""
+    GITHUB_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/github/callback"
+
+    # ── Encryption ────────────────────────────────────────────────────────────
+    # For encrypting GitHub access tokens in the database.
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    ENCRYPTION_KEY: str = ""
 
     # ── LLM ───────────────────────────────────────────────────────────────────
     OPENAI_API_KEY: str = ""
