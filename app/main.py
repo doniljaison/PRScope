@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.v1.endpoints import health
+from app.api.v1.endpoints import health, auth, github
 
 logger = structlog.get_logger()
 
@@ -26,8 +26,6 @@ async def lifespan(app: FastAPI):
     """
     Code before `yield` runs on startup.
     Code after `yield` runs on shutdown.
-
-    Future: add DB connection pool warmup, Redis ping check, etc.
     """
     logger.info(
         "prscope_starting",
@@ -47,32 +45,24 @@ app = FastAPI(
         "AI-powered GitHub PR review engine. "
         "Webhook → Queue → Worker → GitHub comments."
     ),
-    docs_url="/docs",     # Swagger UI at http://localhost:8000/docs
-    redoc_url="/redoc",   # Alternative docs at /redoc
+    docs_url="/docs",
+    redoc_url="/redoc",
     lifespan=lifespan,
 )
 
 # ── Middleware ─────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],     # ← Tighten this to specific domains in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-# Each feature area is a separate router (file). Register them here.
-# Pattern: app.include_router(router, prefix="/api/v1", tags=["..."])
-
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
-
-# Future routers (uncomment as you build each feature):
-# from app.api.v1.endpoints import auth, webhooks, repos, prs
-# app.include_router(auth.router,     prefix="/api/v1", tags=["auth"])
-# app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
-# app.include_router(repos.router,    prefix="/api/v1", tags=["repos"])
-# app.include_router(prs.router,      prefix="/api/v1", tags=["pull-requests"])
+app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+app.include_router(github.router, prefix="/api/v1", tags=["github-oauth"])
 
 
 # ── Root endpoint ─────────────────────────────────────────────────────────────
