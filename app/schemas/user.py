@@ -32,6 +32,8 @@ class UserRead(UserBase):
 
     id: uuid.UUID
     github_username: str | None
+    github_id: int | None = None
+    avatar_url: str | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

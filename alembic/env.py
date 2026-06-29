@@ -23,14 +23,14 @@ from app.config import settings
 from app.database import Base
 
 # ── Import every model file here ────────────────────────────────────────────
-# This import looks unused (no `User.something` is called below) but it is
-# NOT unused — importing the module registers the User class with
-# Base.metadata as a side effect of the class body running. If you add a
-# new model file and forget to import it here, --autogenerate will silently
-# produce an EMPTY migration for it. This is one of the most common Alembic
-# gotchas — now you know about it on Day 2 instead of discovering it the
-# hard way on Day 12.
+# Importing the module registers each model class with Base.metadata.
+# If you add a new model and forget to import it here, --autogenerate
+# will silently produce an EMPTY migration for it.
 from app.models.user import User  # noqa: F401
+from app.models.repository import Repository  # noqa: F401
+from app.models.pull_request import PullRequest  # noqa: F401
+from app.models.analysis_job import AnalysisJob  # noqa: F401
+from app.models.review_comment import ReviewComment  # noqa: F401
 
 config = context.config
 
