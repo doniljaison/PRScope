@@ -25,6 +25,7 @@ dependencies = [
 
     # ── HTTP Client ───────────────────────────────────────────────────────────
     "httpx>=0.27.0",              # Async HTTP client (for GitHub API, LLM API)
+    "tenacity>=8.3.0",            # Robust retry logic for API rate limits and failures
 
     # ── Auth ──────────────────────────────────────────────────────────────────
     "python-jose[cryptography]>=3.3.0",  # JWT tokens
@@ -42,7 +43,9 @@ dependencies = [
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.7",
+    "pytest-mock>=3.14.0",   # For mocking in tests
     "httpx>=0.27.0",         # Also used for testing FastAPI via TestClient
+    "respx>=0.21.1",         # HTTP mocking library for testing external API calls
     "ruff>=0.4.7",           # Extremely fast linter + formatter (replaces flake8+black)
 ]
 

@@ -114,14 +114,19 @@ PRScope/
 - **Day 5-6 (JWT Auth):** Full JWT authentication flow implemented (`login`, `register`, `refresh`, `logout`, `me`). Redis is used to store/revoke refresh tokens. Tests updated and `get_db` dependency overrides configured in Pytest to fix event loop mismatch.
 - **Day 7 (GitHub OAuth):** `GET /auth/github` and `GET /auth/github/callback` implemented. Connected `passlib` bcrypt hashing for normal login. Set up `cryptography` Fernet encryption for GitHub tokens. Overcame bcrypt v4 incompatibility issue by pinning `bcrypt<4.0.0` in `pyproject.toml`.
 
+### Week 2: Core Backend Engine (Days 8-12)
+- **Day 8-9 (GitHub API Client):** Created `app/services/github_client.py` using `httpx` to handle rate limits and 429/503 errors with `tenacity` exponential backoff.
+- **Day 10-11 (Celery & Redis):** Configured Celery background tasks in `app/workers/celery_app.py`, created `analyze_pr_task`, and enabled the background worker in `docker-compose.yml`.
+- **Day 12 (Webhook Endpoint):** Implemented `POST /api/v1/webhooks/github` to receive PR events, verify HMAC-SHA256 signatures, and asynchronously dispatch jobs to Celery for processing. Added `respx` and `pytest-mock` to handle comprehensive HTTP and async task testing.
+
 ## Important Tech Details / Gotchas Discovered
 1. **Pytest Asyncio Mismatches:** If multiple tests hit the Fast API database endpoints without overriding the `get_db` dependency in the client fixture, you'll encounter a `RuntimeError: Task got Future attached to a different loop`.
 2. **Docker Volumes:** Remember to map `./tests:/app/tests` inside `docker-compose.yml` so you can test quickly without rebuilding.
 3. **Passlib & Bcrypt v4:** `passlib` v1.7.4 is incompatible with `bcrypt>=4.0.0` during the `_detect_wrap_bug` step. We pinned `bcrypt<4.0.0` in `pyproject.toml` to solve this.
+4. **Celery Worker Sync vs Async:** Celery workers run synchronously by default. We added an `async_to_sync` wrapper utility in `tasks.py` for eventual async processing compatibility inside background tasks.
 
 ## Next Step
-- Once Docker finishes rebuilding, run tests `pytest` to confirm everything is green.
-- Then, proceed to Day 8: Integrating GitHub Webhooks.
+- Day 14: Integrating LLMs (OpenAI/Anthropic) to analyze the PR diff inside the Celery task and parse the JSON responses.
 
 ## GitHub OAuth Setup (for Day 7)
 1. Go to https://github.com/settings/developers

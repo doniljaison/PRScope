@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.api.v1.endpoints import health, auth, github
+from app.api.v1.endpoints import health, auth, github, webhooks
 
 logger = structlog.get_logger()
 
@@ -62,7 +62,8 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
-app.include_router(github.router, prefix="/api/v1", tags=["github-oauth"])
+app.include_router(github.router, prefix="/api/v1", tags=["github"])
+app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
 
 
 # ── Root endpoint ─────────────────────────────────────────────────────────────

@@ -12,9 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv — the fast Python package manager (replaces pip)
-# --no-cache-dir = don't keep pip's download cache in the image
-RUN pip install --no-cache-dir uv
+# We will use pip directly to avoid network flakiness with uv binaries
+# RUN pip install --default-timeout=1000 --no-cache-dir uv
 
 # ── Copy dependency file BEFORE source code ────────────────────────────────────
 # Why? Docker layer caching.
@@ -23,11 +22,10 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml .
 
 # Create the minimal package structure needed for editable install
-# uv pip install -e requires the package to be "importable"
 RUN mkdir -p app && touch app/__init__.py
 
-# Install all dependencies into the system Python environment
-RUN uv pip install --system -e ".[dev]"
+# Install all dependencies into the system Python environment using pip
+RUN pip install --default-timeout=1000 --no-cache-dir -e ".[dev]"
 
 # ── Copy source code ────────────────────────────────────────────────────────
 # This layer changes often (every code change), so it comes LAST
