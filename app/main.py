@@ -10,16 +10,23 @@ This is the entry point. Uvicorn runs this file:
 lifespan() handles startup and shutdown — cleaner than @app.on_event (deprecated).
 """
 
+import asyncio
 import structlog
+import redis.asyncio as aioredis
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
 from app.config import settings
-from app.api.v1.endpoints import health, auth, github, webhooks
+from app.api.v1.endpoints import health, auth, github, webhooks, websockets
+from app.services.websocket_manager import listen_to_redis_pubsub
+from app.core.rate_limit import limiter
 
 logger = structlog.get_logger()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,7 +40,15 @@ async def lifespan(app: FastAPI):
         version=settings.APP_VERSION,
         debug=settings.DEBUG,
     )
+    
+    # Start Redis pub/sub listener for WebSockets
+    redis_client = aioredis.from_url(settings.REDIS_URL)
+    pubsub_task = asyncio.create_task(listen_to_redis_pubsub(redis_client))
+    
     yield
+    
+    pubsub_task.cancel()
+    await redis_client.aclose()
     logger.info("prscope_shutdown")
 
 
@@ -59,12 +74,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(github.router, prefix="/api/v1", tags=["github"])
 app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
-
+app.include_router(websockets.router, prefix="/api/v1", tags=["websockets"])
 
 # ── Root endpoint ─────────────────────────────────────────────────────────────
 @app.get("/", include_in_schema=False)

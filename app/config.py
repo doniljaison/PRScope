@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # ── AI & External APIs ────────────────────────────────────────────────────
+    ANTHROPIC_API_KEY: str = ""
+
     # ── GitHub ────────────────────────────────────────────────────────────────
     GITHUB_CLIENT_ID: str = ""
     GITHUB_CLIENT_SECRET: str = ""

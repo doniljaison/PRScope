@@ -39,7 +39,10 @@ async def verify_github_signature(request: Request, x_hub_signature_256: str = H
         logger.warning("Invalid GitHub webhook signature received.")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
+from app.core.rate_limit import limiter
+
 @router.post("/github", status_code=202)
+@limiter.limit("30/minute")
 async def github_webhook(
     request: Request,
     x_github_event: str = Header(None),
