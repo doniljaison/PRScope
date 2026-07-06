@@ -3,7 +3,8 @@ import respx
 import httpx
 from unittest.mock import AsyncMock, patch
 
-from app.services.llm_client import LLMClient, LLMParseError
+from app.services.llm_client import LLMClient
+from app.core.exceptions import LLMParseError
 
 @pytest.fixture
 def llm_client():

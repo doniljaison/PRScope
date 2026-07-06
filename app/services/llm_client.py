@@ -8,12 +8,9 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from app.config import settings
+from app.core.exceptions import LLMParseError
 
 logger = logging.getLogger(__name__)
-
-class LLMParseError(Exception):
-    """Raised when the LLM response cannot be parsed as expected."""
-    pass
 
 class LLMClient:
     def __init__(self):

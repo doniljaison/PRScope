@@ -3,7 +3,8 @@ import pytest
 import respx
 from tenacity import RetryError
 
-from app.services.github_client import GitHubAPIError, GitHubClient, GitHubRateLimitError
+from app.services.github_client import GitHubClient
+from app.core.exceptions import GitHubAPIError, GitHubRateLimitError
 
 @pytest.fixture
 def github_client():

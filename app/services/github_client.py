@@ -10,16 +10,9 @@ import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.services.cache import cache_get, cache_set
+from app.core.exceptions import GitHubAPIError, GitHubRateLimitError
 
 logger = logging.getLogger(__name__)
-
-class GitHubAPIError(Exception):
-    """Custom exception for GitHub API failures."""
-    pass
-
-class GitHubRateLimitError(GitHubAPIError):
-    """Custom exception for GitHub Rate Limit Exceeded."""
-    pass
 
 def log_attempt_number(retry_state):
     logger.warning(f"Retrying GitHub API call: attempt {retry_state.attempt_number}")
