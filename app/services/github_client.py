@@ -1,12 +1,15 @@
 """
 github_client.py — A dedicated client for interacting with the GitHub API.
-Handles authentication, rate-limit checking, and retries using tenacity.
+Handles authentication, rate-limit checking, retries using tenacity, and
+Redis caching of responses to reduce API rate limit consumption.
 """
 import logging
 from typing import Any
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from app.services.cache import cache_get, cache_set
 
 logger = logging.getLogger(__name__)
 
@@ -95,22 +98,43 @@ class GitHubClient:
     async def get_pull_request(self, repo_full_name: str, pr_number: int) -> dict[str, Any]:
         """
         Fetch details of a specific Pull Request.
+        Results are cached in Redis for 5 minutes to reduce API rate limit consumption.
         """
+        cache_key = f"github:pr:{repo_full_name}:{pr_number}"
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            logger.info(f"Returning cached PR data for {repo_full_name}#{pr_number}")
+            return cached
+
         endpoint = f"/repos/{repo_full_name}/pulls/{pr_number}"
         response = await self._make_request("GET", endpoint)
-        return response.json()
+        data = response.json()
+
+        # Cache for 5 minutes — PR metadata doesn't change every second
+        await cache_set(cache_key, data, ttl_seconds=300)
+        return data
 
     async def get_pr_diff(self, repo_full_name: str, pr_number: int) -> str:
         """
         Fetch the raw diff of a Pull Request.
+        Results are cached in Redis for 10 minutes. Diffs only change
+        when new commits are pushed (which triggers a new webhook anyway).
         """
+        cache_key = f"github:diff:{repo_full_name}:{pr_number}"
+        cached = await cache_get(cache_key)
+        if cached is not None:
+            logger.info(f"Returning cached diff for {repo_full_name}#{pr_number}")
+            return cached
+
         endpoint = f"/repos/{repo_full_name}/pulls/{pr_number}"
         # To get the diff, GitHub requires a specific Accept header
         headers = {"Accept": "application/vnd.github.v3.diff"}
-        # httpx merging headers requires passing them explicitly if we don't want to overwrite all client headers.
-        # Actually httpx merges request headers with client headers automatically.
         response = await self._make_request("GET", endpoint, headers=headers)
-        return response.text
+        diff_text = response.text
+
+        # Cache for 10 minutes — diffs don't change unless new commits are pushed
+        await cache_set(cache_key, diff_text, ttl_seconds=600)
+        return diff_text
 
     async def post_review_comment(self, repo_full_name: str, pr_number: int, body: str) -> dict[str, Any]:
         """

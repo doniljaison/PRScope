@@ -7,6 +7,7 @@ import redis
 from app.workers.celery_app import celery_app
 from app.services.github_client import GitHubClient
 from app.services.llm_client import LLMClient
+from app.services.cache import cache_get, cache_set
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -40,15 +41,29 @@ def async_to_sync(coro):
     max_retries=3,
     name="app.workers.tasks.analyze_pr_task"
 )
-def analyze_pr_task(self, pr_id_str: str):
+def analyze_pr_task(self, pr_id_str: str, commit_sha: str = ""):
     """
     Background task to analyze a PR.
     This runs asynchronously in the Celery worker process.
+
+    Args:
+        pr_id_str: The UUID of the pull request as a string.
+        commit_sha: The head commit SHA — used for deduplication.
+                    If we've already analyzed this exact SHA, skip the LLM call.
     """
     logger.info(f"Starting analysis for PR: {pr_id_str}")
     publish_status(pr_id_str, "started", "Analysis job started")
     
     async def run_analysis():
+        # ── Deduplication: skip if this exact commit SHA was already analyzed ──
+        if commit_sha:
+            cache_key = f"analysis:{commit_sha}"
+            cached_result = await cache_get(cache_key)
+            if cached_result is not None:
+                logger.info(f"Analysis for commit {commit_sha} already cached — skipping LLM call")
+                publish_status(pr_id_str, "completed", "Analysis already cached for this commit SHA")
+                return cached_result
+
         # In a real app, we'd get the GitHub token and repo details from the DB using pr_id_str.
         # For now, we mock the inputs to demonstrate the LLM and websocket flow.
         github = GitHubClient(access_token="fake_token")
@@ -69,6 +84,10 @@ def analyze_pr_task(self, pr_id_str: str):
         
         publish_status(pr_id_str, "posting_comments", f"Posting {len(comments)} comments to GitHub")
         # In the future: await github.post_review_comment(...)
+
+        # ── Cache the results keyed by commit SHA (1 hour TTL) ────────────────
+        if commit_sha:
+            await cache_set(f"analysis:{commit_sha}", comments, ttl_seconds=3600)
         
         return comments
         
