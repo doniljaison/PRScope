@@ -25,6 +25,8 @@ from app.config import settings
 from app.api.v1.endpoints import health, auth, github, webhooks, websockets
 from app.services.websocket_manager import listen_to_redis_pubsub
 from app.core.rate_limit import limiter
+from app.core.exceptions import PRScopeError, prscope_exception_handler, unhandled_exception_handler
+from app.core.middleware import RequestIDMiddleware
 
 logger = structlog.get_logger()
 
@@ -66,6 +68,9 @@ app = FastAPI(
 )
 
 # ── Middleware ─────────────────────────────────────────────────────────────────
+# Order matters: middleware added LAST runs FIRST (outermost).
+# So RequestIDMiddleware is added last to ensure every request gets an ID
+# before any other middleware (CORS, rate limiting, etc.) runs.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -77,6 +82,17 @@ app.add_middleware(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+# ── Exception Handlers ────────────────────────────────────────────────────────
+# Catch all PRScopeError subclasses → consistent JSON error envelope
+app.add_exception_handler(PRScopeError, prscope_exception_handler)
+# Catch-all for truly unexpected errors → clean 500 JSON instead of HTML
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
+# ── Request Tracing ───────────────────────────────────────────────────────────
+# Added last = runs first (outermost middleware). Every request gets an
+# X-Request-ID before any other processing happens.
+app.add_middleware(RequestIDMiddleware)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
