@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ── AI & External APIs ────────────────────────────────────────────────────
-    ANTHROPIC_API_KEY: str = ""
+    # (Keys are defined below under LLM)
 
     # ── GitHub ────────────────────────────────────────────────────────────────
     GITHUB_CLIENT_ID: str = ""

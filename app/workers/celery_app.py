@@ -25,6 +25,7 @@ celery_app.conf.update(
     # Route certain tasks to specific queues
     task_routes={
         "app.workers.tasks.analyze_pr_task": {"queue": "high_priority"},
+        "app.workers.tasks.dlq_handler": {"queue": "dead_letter"},
     },
     # Ensure idempotency by acknowledging tasks AFTER they are completed.
     # Actually, Celery by default acks before execution.

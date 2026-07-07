@@ -4,6 +4,9 @@ import logging
 import uuid
 import redis
 
+from celery import Task
+from celery.exceptions import MaxRetriesExceededError
+
 from app.workers.celery_app import celery_app
 from app.services.github_client import GitHubClient
 from app.services.llm_client import LLMClient
@@ -34,8 +37,30 @@ def async_to_sync(coro):
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
 
+@celery_app.task(name="app.workers.tasks.dlq_handler", queue="dead_letter")
+def dlq_handler(task_id: str, task_name: str, args: list, kwargs: dict, exc: str):
+    """
+    Dead Letter Queue handler.
+    Logs the permanently failed task details for manual inspection.
+    In a real system, this might save to a database table or send an alert.
+    """
+    logger.critical(
+        f"DLQ Alert: Task {task_name} [{task_id}] failed permanently. "
+        f"Args: {args}, Kwargs: {kwargs}. Exception: {exc}"
+    )
+
+class PRScopeTask(Task):
+    """Custom base task that routes permanently failed tasks to the DLQ."""
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        # We only want to send to DLQ if all retries are exhausted.
+        # on_failure is called when a task finally fails after all retries.
+        logger.error(f"Task {self.name} [{task_id}] failed permanently, routing to DLQ.")
+        dlq_handler.delay(task_id, self.name, list(args), dict(kwargs), str(exc))
+        super().on_failure(exc, task_id, args, kwargs, einfo)
+
 @celery_app.task(
     bind=True,
+    base=PRScopeTask,
     autoretry_for=(Exception,),
     retry_backoff=True,
     max_retries=3,
