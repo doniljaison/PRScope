@@ -6,12 +6,16 @@ from tenacity import RetryError
 from app.services.github_client import GitHubClient
 from app.core.exceptions import GitHubAPIError, GitHubRateLimitError
 
+from unittest.mock import patch
+
 @pytest.fixture
 def github_client():
-    client = GitHubClient(access_token="fake_token")
-    yield client
-    # The actual code closes the client, but for testing we can just let it go out of scope,
-    # or explicitly close it if we want strict resource management.
+    with patch("app.services.github_client.cache_get", return_value=None), \
+         patch("app.services.github_client.cache_set", return_value=True):
+        client = GitHubClient(access_token="fake_token")
+        yield client
+        # The actual code closes the client, but for testing we can just let it go out of scope,
+        # or explicitly close it if we want strict resource management.
 
 @pytest.mark.asyncio
 async def test_get_pull_request_success(github_client):
