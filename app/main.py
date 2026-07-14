@@ -22,7 +22,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
-from app.api.v1.endpoints import health, auth, github, webhooks, websockets
+from app.api.v1.endpoints import health, auth, github, webhooks, websockets, analytics
 from app.services.websocket_manager import listen_to_redis_pubsub
 from app.core.rate_limit import limiter
 from app.core.exceptions import PRScopeError, prscope_exception_handler, unhandled_exception_handler
@@ -100,6 +100,7 @@ app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(github.router, prefix="/api/v1", tags=["github"])
 app.include_router(webhooks.router, prefix="/api/v1", tags=["webhooks"])
 app.include_router(websockets.router, prefix="/api/v1", tags=["websockets"])
+app.include_router(analytics.router, prefix="/api/v1", tags=["analytics"])
 
 # ── Root endpoint ─────────────────────────────────────────────────────────────
 @app.get("/", include_in_schema=False)
