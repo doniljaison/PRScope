@@ -2,18 +2,36 @@
 
 > AI-powered GitHub PR review engine — event-driven webhook pipeline built with FastAPI.
 
-When a developer opens a pull request, PRScope automatically fetches the diff, queues an async analysis job, runs an AI code review, and posts inline comments back to GitHub. Real-time job status is streamed via WebSockets.
+When a developer opens a pull request, PRScope automatically fetches the diff, queues an async analysis job via Celery, runs an AI code review using Claude, and posts inline comments back to GitHub. Real-time job status is streamed via WebSockets.
 
 ---
 
 ## Architecture
 
 ```
-GitHub Webhook → FastAPI → Redis Queue → Celery Worker → GitHub API (post comments)
-                    │                          │
-                 PostgreSQL              OpenAI / Claude API
-                    │
-              WebSocket Hub → Connected clients (real-time status)
+                    ┌──────────────────────────────────────────────────┐
+                    │                  PRScope                        │
+                    │                                                  │
+ GitHub ──webhook──▶│ FastAPI ──▶ Redis Queue ──▶ Celery Worker       │
+                    │    │                           │    │            │
+                    │    ▼                           ▼    ▼            │
+                    │ PostgreSQL              Claude API  GitHub API   │
+                    │    │                         (review) (comment)  │
+                    │    ▼                                             │
+                    │ WebSocket Hub ──▶ Connected clients (real-time)  │
+                    └──────────────────────────────────────────────────┘
+```
+
+### Request Flow
+
+```
+1. GitHub sends POST /webhooks/github (HMAC-SHA256 signed)
+2. FastAPI verifies signature, checks idempotency (Redis)
+3. Celery task is dispatched to Redis queue
+4. Worker fetches PR diff from GitHub API (cached in Redis)
+5. Worker sends diff to Claude for code review
+6. Worker publishes status updates via Redis Pub/Sub → WebSocket clients
+7. Results stored in PostgreSQL
 ```
 
 ## Tech Stack
@@ -21,69 +39,72 @@ GitHub Webhook → FastAPI → Redis Queue → Celery Worker → GitHub API (pos
 | Layer | Technology |
 |---|---|
 | API Framework | FastAPI (async, ASGI) |
-| Database | PostgreSQL 15 + SQLAlchemy (async) + Alembic |
-| Cache / Broker | Redis 7 |
-| Task Queue | Celery |
-| Real-time | WebSockets (native FastAPI) |
-| External APIs | GitHub REST API, OpenAI / Anthropic |
+| Database | PostgreSQL 15 + SQLAlchemy 2.0 (async) + Alembic |
+| Cache / Broker | Redis 7 (hiredis) |
+| Task Queue | Celery 5 |
+| AI Code Review | Anthropic Claude 3.5 Sonnet |
+| Real-time | WebSockets (native FastAPI) + Redis Pub/Sub |
+| HTTP Client | httpx + tenacity (retries with exponential backoff) |
+| Auth | JWT (python-jose) + bcrypt + GitHub OAuth |
+| Rate Limiting | slowapi (Redis-backed) |
+| Logging | structlog (structured JSON) |
 | Containerization | Docker + Docker Compose |
-| Testing | pytest + pytest-asyncio |
-| CI | GitHub Actions |
+| Testing | pytest + pytest-asyncio + respx |
 
 ---
 
 ## Project Structure
 
 ```
-prscope/
+PRScope/
 ├── app/
-│   ├── main.py                  # FastAPI app — entry point
-│   ├── config.py                # All settings via pydantic-settings
-│   ├── database.py              # Async SQLAlchemy engine + session
+│   ├── main.py                     # FastAPI app — entry point
+│   ├── config.py                   # All settings via pydantic-settings
+│   ├── database.py                 # Async SQLAlchemy engine + session
 │   ├── api/
-│   │   ├── deps.py              # Shared dependencies (auth, db session)
-│   │   └── v1/
-│   │       └── endpoints/
-│   │           ├── health.py    # GET /health
-│   │           ├── auth.py      # Register, login, refresh token
-│   │           ├── webhooks.py  # POST /webhooks/github
-│   │           ├── repos.py     # CRUD for connected repos
-│   │           └── prs.py       # PR list, analysis results
-│   ├── models/                  # SQLAlchemy ORM models (DB tables)
-│   │   ├── user.py
-│   │   ├── repository.py
-│   │   ├── pull_request.py
-│   │   └── analysis_job.py
-│   ├── schemas/                 # Pydantic models (request/response shapes)
-│   │   ├── user.py
-│   │   ├── repository.py
-│   │   ├── pull_request.py
-│   │   └── analysis_job.py
-│   ├── services/                # Business logic (no FastAPI deps here)
-│   │   ├── github_client.py     # GitHub REST API wrapper
-│   │   ├── llm_client.py        # OpenAI / Claude wrapper
-│   │   └── cache.py             # Redis cache helpers
+│   │   ├── deps.py                 # Shared dependencies (auth, db session)
+│   │   └── v1/endpoints/
+│   │       ├── health.py           # GET /health, /health/detailed
+│   │       ├── auth.py             # Register, login, refresh, logout, me
+│   │       ├── github.py           # GitHub OAuth flow
+│   │       ├── webhooks.py         # POST /webhooks/github
+│   │       ├── websockets.py       # WS /ws/jobs/{job_id}
+│   │       └── analytics.py        # GET /repos/{id}/stats, /repos/{id}/recent
+│   ├── models/                     # SQLAlchemy ORM models
+│   │   ├── user.py                 # User (email + GitHub OAuth)
+│   │   ├── repository.py           # Connected GitHub repos
+│   │   ├── pull_request.py         # PR records from webhooks
+│   │   ├── analysis_job.py         # Analysis job state machine
+│   │   └── review_comment.py       # AI-generated review comments
+│   ├── schemas/                    # Pydantic request/response models
+│   │   ├── user.py, auth.py        # Auth shapes
+│   │   ├── repository.py           # Repo shapes
+│   │   ├── pull_request.py         # PR shapes
+│   │   ├── analysis.py             # Analysis + comment shapes
+│   │   └── analytics.py            # Stats + dashboard shapes
+│   ├── services/                   # Business logic
+│   │   ├── github_client.py        # GitHub REST API (cached, retried)
+│   │   ├── llm_client.py           # Claude API wrapper
+│   │   ├── cache.py                # Redis cache-aside helper
+│   │   ├── websocket_manager.py    # WebSocket connection manager
+│   │   ├── auth_service.py         # Token storage helpers
+│   │   └── github_oauth.py         # OAuth token exchange
 │   ├── workers/
-│   │   ├── celery_app.py        # Celery instance + config
-│   │   └── tasks/
-│   │       └── analysis.py      # analyze_pr task
+│   │   ├── celery_app.py           # Celery instance + config
+│   │   └── tasks.py                # analyze_pr_task + DLQ handler
 │   └── core/
-│       ├── security.py          # JWT, password hashing
-│       └── exceptions.py        # Custom exceptions + handlers
-├── alembic/                     # DB migration files
-│   └── versions/
-├── tests/
-│   ├── conftest.py              # Shared pytest fixtures
-│   └── api/
-│       └── test_health.py
-├── docker/
-│   └── Dockerfile
-├── .env.example                 # Copy this to .env and fill in values
-├── .gitignore
-├── docker-compose.yml
-├── pyproject.toml               # Dependencies + tool config
-├── alembic.ini
-└── BUGS.md                      # Document hard bugs as you hit them
+│       ├── security.py             # JWT, password hashing
+│       ├── encryption.py           # Fernet encryption for GitHub tokens
+│       ├── exceptions.py           # Exception hierarchy + handlers
+│       ├── middleware.py           # X-Request-ID tracing
+│       └── rate_limit.py           # slowapi limiter config
+├── alembic/                        # DB migrations
+├── tests/                          # 70+ tests (unit, integration, edge cases)
+├── docker/Dockerfile
+├── docker-compose.yml              # api + worker + db + redis
+├── pyproject.toml                  # Dependencies + tool config
+├── BUGS.md                         # Hard bugs documented with solutions
+└── everyday_documentation/         # Daily progress reports
 ```
 
 ---
@@ -98,27 +119,32 @@ prscope/
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/prscope.git
-cd prscope
+git clone https://github.com/doniljaison/PRScope.git
+cd PRScope
 
 # 2. Copy env file and fill in values
 cp .env.example .env
+# Required: ANTHROPIC_API_KEY, GITHUB_WEBHOOK_SECRET, SECRET_KEY
 
 # 3. Start all services
 docker compose up --build
 
-# 4. Visit the API
+# 4. Run database migrations
+docker compose exec api alembic upgrade head
+
+# 5. Visit the API docs
 open http://localhost:8000/docs
 ```
 
 ### Verify everything is running
 ```bash
+# Basic health check
 curl http://localhost:8000/api/v1/health
 # → {"status": "ok", "app": "PRScope", ...}
 
+# Detailed health (DB + Redis connectivity)
 curl http://localhost:8000/api/v1/health/detailed
-# → checks DB + Redis connectivity, e.g.:
-# {"status":"ok","checks":{"redis":"ok","database":"ok"}, ...}
+# → {"status":"ok","checks":{"redis":"ok","database":"ok"}, ...}
 ```
 
 ---
@@ -141,7 +167,7 @@ docker compose exec redis redis-cli
 # Run a migration
 docker compose exec api alembic upgrade head
 
-# Create a new migration after changing/adding a model
+# Create a new migration
 docker compose exec api alembic revision --autogenerate -m "describe the change"
 ```
 
@@ -149,17 +175,16 @@ docker compose exec api alembic revision --autogenerate -m "describe the change"
 
 ## Environment Variables
 
-See `.env.example` for all required variables.
-
 | Variable | Description |
 |---|---|
 | `POSTGRES_*` | Database connection details |
 | `REDIS_URL` | Redis connection string |
-| `SECRET_KEY` | JWT signing key (generate with `openssl rand -hex 32`) |
+| `SECRET_KEY` | JWT signing key (`openssl rand -hex 32`) |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API key for code review |
 | `GITHUB_CLIENT_ID` | GitHub OAuth App client ID |
 | `GITHUB_CLIENT_SECRET` | GitHub OAuth App client secret |
-| `GITHUB_WEBHOOK_SECRET` | Random secret for signing webhooks |
-| `OPENAI_API_KEY` | OpenAI API key for code review |
+| `GITHUB_WEBHOOK_SECRET` | Random secret for webhook HMAC verification |
+| `ENCRYPTION_KEY` | Fernet key for encrypting GitHub tokens in DB |
 
 ---
 
@@ -169,21 +194,34 @@ See `.env.example` for all required variables.
 |---|---|---|
 | GET | `/` | App info |
 | GET | `/api/v1/health` | Basic health check |
-| GET | `/api/v1/health/detailed` | DB + Redis health check |
+| GET | `/api/v1/health/detailed` | DB + Redis connectivity check |
 | POST | `/api/v1/auth/register` | Create account |
 | POST | `/api/v1/auth/login` | Get JWT tokens |
 | POST | `/api/v1/auth/refresh` | Refresh access token |
+| POST | `/api/v1/auth/logout` | Revoke refresh token |
+| GET | `/api/v1/auth/me` | Get current user profile |
 | GET | `/api/v1/auth/github` | Start GitHub OAuth flow |
-| POST | `/api/v1/webhooks/github` | GitHub webhook receiver |
-| GET | `/api/v1/repos` | List connected repos |
-| GET | `/api/v1/prs/{id}/analysis` | Get analysis result |
-| WS | `/ws/jobs/{job_id}` | Real-time job status stream |
+| GET | `/api/v1/auth/github/callback` | GitHub OAuth callback |
+| POST | `/api/v1/webhooks/github` | GitHub webhook receiver (HMAC verified) |
+| GET | `/api/v1/repos/{id}/stats` | Repository analytics |
+| GET | `/api/v1/repos/{id}/recent` | Recent analysis jobs |
+| WS | `/api/v1/ws/jobs/{job_id}` | Real-time job status stream |
 
-Full interactive docs at `/docs` when running locally.
+Full interactive docs with examples at `/docs` when running locally.
+
+---
+
+## System Design Decisions
+
+- **Event-driven (webhooks) over polling**: GitHub pushes events to us. No wasted API calls.
+- **Celery over background threads**: Celery gives us retries, dead letter queues, priority routing, and horizontal scaling. A background thread gives you none of that.
+- **Redis for both cache and broker**: One less service to manage. Redis handles Pub/Sub, caching, rate limiting, and Celery brokering.
+- **Cache-aside with short TTLs**: We can't guarantee GitHub data stays in sync, so short TTLs (5-10 min) are the pragmatic choice.
+- **Commit SHA deduplication**: If the same commit was already analyzed, skip the LLM call entirely (saves money and time).
+- **Custom exception hierarchy**: Every error returns a consistent JSON envelope with error code, message, and request ID for debugging.
 
 ---
 
 ## BUGS.md
 
-See [BUGS.md](./BUGS.md) — a running log of hard bugs encountered and how they were fixed.
-This is intentional: debugging is the job.
+See [BUGS.md](./BUGS.md) — a running log of hard bugs encountered and how they were fixed. This is intentional: debugging is the job.
