@@ -87,8 +87,7 @@ async def test_webhook_dispatches_celery_task(client, webhook_payload):
         mock_task.delay.assert_called_once()
 
 
-@pytest.mark.asyncio
-async def test_celery_task_runs_with_mocked_services():
+def test_celery_task_runs_with_mocked_services():
     """
     Integration test: run the Celery task synchronously with mocked
     external services and verify it produces the expected result.
@@ -120,8 +119,7 @@ async def test_celery_task_runs_with_mocked_services():
         assert result["results"][0]["body"] == "Consider using a constant here."
 
 
-@pytest.mark.asyncio
-async def test_celery_task_uses_cached_result_for_same_sha():
+def test_celery_task_uses_cached_result_for_same_sha():
     """
     Integration test: when the same commit SHA is analyzed twice,
     the second call should return the cached result without calling the LLM.

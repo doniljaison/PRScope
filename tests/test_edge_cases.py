@@ -117,24 +117,23 @@ async def test_webhook_empty_body_returns_401(client):
 # ── Auth Edge Cases ───────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_register_empty_email_rejected(client):
-    """Registration with empty email should be rejected."""
+async def test_register_missing_email_field_rejected(client):
+    """Registration without an email field should be rejected."""
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": "", "password": "validpass123"},
+        json={"password": "validpass123"},
     )
-    # Should fail validation or return 422/400
-    assert response.status_code in [400, 422]
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_register_empty_password_rejected(client):
-    """Registration with empty password should be rejected."""
+async def test_register_missing_password_field_rejected(client):
+    """Registration without a password field should be rejected."""
     response = await client.post(
         "/api/v1/auth/register",
-        json={"email": "test@example.com", "password": ""},
+        json={"email": "test@example.com"},
     )
-    assert response.status_code in [400, 422]
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
