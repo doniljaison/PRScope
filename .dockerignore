@@ -1,0 +1,40 @@
+# .dockerignore — files excluded from Docker build context
+# Keeps the build context small and fast, and prevents secrets from leaking
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# IDE
+.vscode
+.idea
+
+# Documentation (not needed in container)
+everyday_documentation/
+*.md
+!README.md
+
+# Tests (not needed in production image)
+tests/
+
+# OS
+.DS_Store
+Thumbs.db

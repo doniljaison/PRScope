@@ -45,6 +45,7 @@ engine = create_async_engine(
     pool_pre_ping=True,  # "Ping" a pooled connection before using it — catches stale/dropped connections
     pool_size=5,  # Max number of persistent connections kept open
     max_overflow=10,  # Extra connections allowed temporarily under load spikes
+    pool_recycle=3600,  # Recycle connections after 1 hour — prevents stale TCP on long-lived deployments
 )
 
 # ── Session factory ──────────────────────────────────────────────────────────
