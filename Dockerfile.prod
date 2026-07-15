@@ -1,0 +1,50 @@
+# ── Stage 1: Build dependencies ──────────────────────────────────────────────
+# Multi-stage build: first stage installs everything, second stage copies only
+# what's needed. This produces a smaller final image.
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies (needed to compile C extensions like psycopg2)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml .
+RUN mkdir -p app && touch app/__init__.py
+
+# Install into a virtual environment so we can copy it cleanly
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir --default-timeout=1000 -e .
+
+# ── Stage 2: Production runtime ─────────────────────────────────────────────
+FROM python:3.11-slim AS production
+
+WORKDIR /app
+
+# Install only runtime system dependencies (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the virtual environment from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy application code
+COPY . .
+
+# Create a non-root user for security
+RUN groupadd -r prscope && useradd -r -g prscope prscope
+RUN chown -R prscope:prscope /app
+USER prscope
+
+# Health check — verifies the API is responding
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+
+# Default: run the API. Override in docker-compose for the worker.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

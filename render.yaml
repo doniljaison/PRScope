@@ -1,0 +1,103 @@
+# render.yaml — Render.com Infrastructure as Code
+#
+# This file lets Render auto-detect and deploy the entire PRScope stack:
+#   - Web service (FastAPI API)
+#   - Worker service (Celery)
+#   - PostgreSQL database
+#   - Redis cache/broker
+#
+# Deploy: Connect this GitHub repo on render.com → it reads this file automatically.
+
+services:
+  # ── FastAPI API server ─────────────────────────────────────────────────────
+  - type: web
+    name: prscope-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.prod
+    envVars:
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: prscope-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: prscope-db
+          property: port
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: prscope-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: prscope-db
+          property: password
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: prscope-db
+          property: database
+      - key: REDIS_URL
+        fromService:
+          name: prscope-redis
+          type: redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false  # Set manually in Render dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+    healthCheckPath: /api/v1/health
+
+  # ── Celery background worker ───────────────────────────────────────────────
+  - type: worker
+    name: prscope-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.prod
+    dockerCommand: celery -A app.workers.celery_app worker --loglevel=info -Q default,high_priority,dead_letter --concurrency=2
+    envVars:
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: prscope-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: prscope-db
+          property: port
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: prscope-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: prscope-db
+          property: password
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: prscope-db
+          property: database
+      - key: REDIS_URL
+        fromService:
+          name: prscope-redis
+          type: redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+
+databases:
+  - name: prscope-db
+    plan: free
+    databaseName: prscope
+    user: prscope
+
+# Note: Render's free Redis is available via the dashboard.
+# Create a Redis instance named "prscope-redis" and link it above.
