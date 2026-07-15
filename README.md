@@ -1,5 +1,9 @@
 # PRScope 🔍
 
+[![CI](https://github.com/doniljaison/PRScope/actions/workflows/ci.yml/badge.svg)](https://github.com/doniljaison/PRScope/actions/workflows/ci.yml)
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688.svg)
+
 > AI-powered GitHub PR review engine — event-driven webhook pipeline built with FastAPI.
 
 When a developer opens a pull request, PRScope automatically fetches the diff, queues an async analysis job via Celery, runs an AI code review using Claude, and posts inline comments back to GitHub. Real-time job status is streamed via WebSockets.
