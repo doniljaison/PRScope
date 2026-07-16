@@ -51,15 +51,18 @@ class Repository(Base, TimestampMixin):
         String(255), nullable=True
     )
 
-    # FK to the user who connected this repo
-    owner_id: Mapped[uuid.UUID] = mapped_column(
+    # FK to the user who connected this repo.
+    # Nullable because webhook-registered repos don't have a known owner —
+    # the webhook payload doesn't tell us which PRScope user owns the repo.
+    # It gets filled in when a user explicitly connects the repo via OAuth.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     # ── Relationships ────────────────────────────────────────────────────────
-    owner: Mapped["User"] = relationship(  # noqa: F821
+    owner: Mapped["User | None"] = relationship(  # noqa: F821
         back_populates="repositories",
         lazy="selectin",
     )

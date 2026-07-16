@@ -69,13 +69,13 @@ async def _upsert_repository(db: AsyncSession, repo_payload: dict[str, Any]) -> 
     repo = result.scalar_one_or_none()
 
     if repo is None:
-        # Auto-register the repo. We don't have an owner_id from the webhook,
-        # so we create a "system" repository. In a full implementation,
-        # you'd match this to the user who installed the GitHub App.
+        # Auto-register the repo. owner_id is None because the webhook
+        # doesn't tell us which PRScope user owns this repo. It gets
+        # filled in when a user explicitly connects the repo via OAuth.
         repo = Repository(
             github_id=github_id,
             full_name=full_name,
-            owner_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),  # placeholder
+            owner_id=None,
         )
         db.add(repo)
         await db.flush()
