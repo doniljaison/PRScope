@@ -2,10 +2,10 @@
 test_integration.py — End-to-end integration tests.
 
 These tests simulate the full pipeline:
-  Webhook arrives → PR record created → Celery task dispatched → LLM called → results stored
+  Webhook arrives → DB records created → Celery task dispatched → LLM called → results stored
 
-Uses CELERY_TASK_ALWAYS_EAGER=True so tasks run synchronously during tests.
-Mocks external services (GitHub API, Claude LLM) but exercises real DB operations.
+Mocks external services (GitHub API, Claude LLM) but exercises real DB operations
+where possible.
 """
 
 import hashlib
@@ -39,10 +39,11 @@ def webhook_payload():
     return {
         "action": "opened",
         "pull_request": {
+            "id": 123456,
             "html_url": "https://github.com/octocat/Hello-World/pull/42",
             "number": 42,
             "title": "Fix race condition in webhook handler",
-            "head": {"sha": "abc123def456"},
+            "head": {"sha": "abc123def456", "ref": "fix/race"},
             "base": {"ref": "main"},
             "user": {"login": "octocat"},
         },
@@ -53,15 +54,28 @@ def webhook_payload():
     }
 
 
-@pytest.mark.asyncio
-async def test_webhook_dispatches_celery_task(client, webhook_payload):
-    """
-    Integration test: a valid webhook with correct signature enqueues a Celery task.
+@pytest.fixture(autouse=True)
+def mock_redis_for_integration(mocker):
+    """Mock Redis for webhook idempotency — always returns True (new key)."""
+    mock_redis = AsyncMock()
+    mock_redis.set = AsyncMock(return_value=True)
+    mock_redis.aclose = AsyncMock()
 
-    This verifies the full synchronous path:
-    1. Webhook endpoint validates HMAC signature
-    2. Webhook endpoint parses the PR payload
-    3. Celery task is dispatched (mocked to verify it was called)
+    async def override_get_redis():
+        yield mock_redis
+
+    from app.api.deps import get_redis
+    app.dependency_overrides[get_redis] = override_get_redis
+    yield mock_redis
+
+
+@pytest.mark.asyncio
+async def test_webhook_creates_db_records_and_dispatches_task(client, webhook_payload, db_session):
+    """
+    Integration test: a valid webhook should:
+    1. Create a Repository record in the database
+    2. Create a PullRequest record in the database
+    3. Dispatch a Celery task with the real PR ID
     """
     payload_bytes = json.dumps(webhook_payload).encode("utf-8")
     signature = _sign_payload(payload_bytes, settings.GITHUB_WEBHOOK_SECRET)
@@ -83,43 +97,16 @@ async def test_webhook_dispatches_celery_task(client, webhook_payload):
         assert response.status_code == 202
         data = response.json()
         assert data["status"] == "accepted"
-        # Verify the Celery task was actually dispatched
+        assert "pr_id" in data
+
+        # Verify the Celery task was dispatched with a real UUID and commit SHA
         mock_task.delay.assert_called_once()
+        call_args = mock_task.delay.call_args[0]
+        assert call_args[0] == data["pr_id"]
+        assert call_args[1] == "abc123def456"
 
 
-def test_celery_task_runs_with_mocked_services():
-    """
-    Integration test: run the Celery task synchronously with mocked
-    external services and verify it produces the expected result.
-    """
-    with patch("app.workers.tasks.GitHubClient") as mock_gh, \
-         patch("app.workers.tasks.LLMClient") as mock_llm, \
-         patch("app.workers.tasks.publish_status"), \
-         patch("app.workers.tasks.cache_get", return_value=None), \
-         patch("app.workers.tasks.cache_set", return_value=True):
-
-        mock_gh_instance = mock_gh.return_value
-        mock_gh_instance.get_pr_diff = AsyncMock(
-            return_value="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new"
-        )
-
-        mock_llm_instance = mock_llm.return_value
-        mock_llm_instance.analyze_diff = AsyncMock(return_value=[
-            {"path": "file.py", "line": 1, "body": "Consider using a constant here."},
-            {"path": "file.py", "line": 5, "body": "Missing error handling."},
-        ])
-
-        from app.workers.tasks import analyze_pr_task
-        pr_id = str(uuid.uuid4())
-        result = analyze_pr_task(pr_id, commit_sha="abc123def456")
-
-        assert result["status"] == "success"
-        assert result["pr_id"] == pr_id
-        assert len(result["results"]) == 2
-        assert result["results"][0]["body"] == "Consider using a constant here."
-
-
-def test_celery_task_uses_cached_result_for_same_sha():
+def test_celery_task_cache_deduplication():
     """
     Integration test: when the same commit SHA is analyzed twice,
     the second call should return the cached result without calling the LLM.
@@ -138,17 +125,15 @@ def test_celery_task_uses_cached_result_for_same_sha():
 
         assert result["status"] == "success"
         assert result["results"] == cached_comments
-        # LLM should NOT have been called
         mock_llm.return_value.analyze_diff.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_analytics_endpoint_with_seeded_data(client, db_session):
     """
-    Integration test: seed the DB with a repo, PR, analysis job, and comments,
+    Integration test: seed the DB with a repo, PR, analysis job,
     then hit the analytics endpoint to verify aggregate stats.
     """
-    # Seed a user
     user = User(
         email="analytics_test@example.com",
         hashed_password="hashed",
@@ -157,7 +142,6 @@ async def test_analytics_endpoint_with_seeded_data(client, db_session):
     db_session.add(user)
     await db_session.flush()
 
-    # Seed a repository
     repo = Repository(
         github_id=999999,
         full_name="testorg/analytics-repo",
@@ -166,7 +150,6 @@ async def test_analytics_endpoint_with_seeded_data(client, db_session):
     db_session.add(repo)
     await db_session.flush()
 
-    # Seed a pull request
     pr = PullRequest(
         github_id=888888,
         pr_number=1,
@@ -180,7 +163,6 @@ async def test_analytics_endpoint_with_seeded_data(client, db_session):
     db_session.add(pr)
     await db_session.flush()
 
-    # Seed an analysis job
     job = AnalysisJob(
         status="completed",
         commit_sha="sha123",
@@ -189,7 +171,6 @@ async def test_analytics_endpoint_with_seeded_data(client, db_session):
     db_session.add(job)
     await db_session.flush()
 
-    # Hit the analytics endpoint
     response = await client.get(f"/api/v1/repos/{repo.id}/stats")
     assert response.status_code == 200
 

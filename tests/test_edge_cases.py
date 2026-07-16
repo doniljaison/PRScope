@@ -12,12 +12,27 @@ import json
 import uuid
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def mock_redis_for_edge_cases():
+    """Mock Redis for webhook idempotency checks."""
+    mock_redis = AsyncMock()
+    mock_redis.set = AsyncMock(return_value=True)
+    mock_redis.aclose = AsyncMock()
+
+    async def override_get_redis():
+        yield mock_redis
+
+    from app.api.deps import get_redis
+    app.dependency_overrides[get_redis] = override_get_redis
+    yield mock_redis
 
 
 def _sign_payload(payload_bytes: bytes, secret: str) -> str:
