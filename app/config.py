@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: str = ""
     GITHUB_WEBHOOK_SECRET: str = ""
     GITHUB_OAUTH_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/github/callback"
+    # Safety flag: when False, analysis results are stored in DB but NOT posted
+    # to GitHub as comments. Set to True only when you're ready to go live.
+    ENABLE_GITHUB_POSTING: bool = False
 
     # ── Encryption ────────────────────────────────────────────────────────────
     # For encrypting GitHub access tokens in the database.
