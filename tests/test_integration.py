@@ -35,12 +35,15 @@ def _sign_payload(payload_bytes: bytes, secret: str) -> str:
 
 @pytest.fixture
 def webhook_payload():
-    """A realistic GitHub pull_request webhook payload."""
+    """A realistic GitHub pull_request webhook payload with unique IDs."""
+    # Use random IDs to avoid unique constraint collisions across test runs
+    # (the webhook endpoint commits to the real DB)
+    random_id = uuid.uuid4().int % 10_000_000
     return {
         "action": "opened",
         "pull_request": {
-            "id": 123456,
-            "html_url": "https://github.com/octocat/Hello-World/pull/42",
+            "id": random_id + 1,
+            "html_url": f"https://github.com/integration-test/repo-{random_id}/pull/42",
             "number": 42,
             "title": "Fix race condition in webhook handler",
             "head": {"sha": "abc123def456", "ref": "fix/race"},
@@ -48,8 +51,8 @@ def webhook_payload():
             "user": {"login": "octocat"},
         },
         "repository": {
-            "id": 123456,
-            "full_name": "octocat/Hello-World",
+            "id": random_id,
+            "full_name": f"integration-test/repo-{random_id}",
         },
     }
 
