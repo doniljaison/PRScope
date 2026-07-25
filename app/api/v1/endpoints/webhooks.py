@@ -1,22 +1,8 @@
-"""
-webhooks.py — GitHub webhook receiver.
-
-This is the entry point for all GitHub events. When a developer opens or
-updates a pull request, GitHub POSTs here. We:
-  1. Verify the HMAC-SHA256 signature (is this really from GitHub?)
-  2. Check idempotency via Redis SET NX (have we seen this delivery before?)
-  3. Upsert Repository and PullRequest records in the database
-  4. Dispatch a Celery task for async AI analysis
-  5. Return 202 immediately — never block GitHub's webhook delivery
-
-Idempotency is critical because GitHub retries failed webhooks. Without it,
-a single PR open event could trigger 3 duplicate analyses.
-"""
+"""GitHub webhook receiver with HMAC verification, idempotency, and DB upserts."""
 
 import hashlib
 import hmac
 import logging
-import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -36,14 +22,11 @@ router = APIRouter(prefix="/webhooks")
 
 
 async def verify_github_signature(request: Request, x_hub_signature_256: str = Header(None)):
-    """
-    Verify the HMAC-SHA256 signature sent by GitHub to ensure the webhook is legitimate.
-    """
+    """Verify HMAC-SHA256 signature to ensure the webhook is from GitHub."""
     if not x_hub_signature_256:
         raise HTTPException(status_code=401, detail="Missing X-Hub-Signature-256 header")
 
     payload = await request.body()
-
     secret = settings.GITHUB_WEBHOOK_SECRET.encode("utf-8")
     expected_hash = hmac.new(secret, payload, hashlib.sha256).hexdigest()
     expected_signature = f"sha256={expected_hash}"
@@ -54,12 +37,7 @@ async def verify_github_signature(request: Request, x_hub_signature_256: str = H
 
 
 async def _upsert_repository(db: AsyncSession, repo_payload: dict[str, Any]) -> Repository:
-    """
-    Find or create a Repository record from the webhook payload.
-
-    GitHub webhooks always include repository data, so we upsert here
-    instead of requiring the user to manually register repos.
-    """
+    """Find or create a Repository record from the webhook payload."""
     github_id = repo_payload["id"]
     full_name = repo_payload["full_name"]
 
@@ -69,37 +47,21 @@ async def _upsert_repository(db: AsyncSession, repo_payload: dict[str, Any]) -> 
     repo = result.scalar_one_or_none()
 
     if repo is None:
-        # Auto-register the repo. owner_id is None because the webhook
-        # doesn't tell us which PRScope user owns this repo. It gets
-        # filled in when a user explicitly connects the repo via OAuth.
-        repo = Repository(
-            github_id=github_id,
-            full_name=full_name,
-            owner_id=None,
-        )
+        repo = Repository(github_id=github_id, full_name=full_name, owner_id=None)
         db.add(repo)
         await db.flush()
         logger.info(f"Auto-registered repository: {full_name}")
-    else:
-        # Update full_name if it changed (repo rename)
-        if repo.full_name != full_name:
-            repo.full_name = full_name
-            await db.flush()
+    elif repo.full_name != full_name:
+        repo.full_name = full_name
+        await db.flush()
 
     return repo
 
 
 async def _upsert_pull_request(
-    db: AsyncSession,
-    repo: Repository,
-    pr_payload: dict[str, Any],
+    db: AsyncSession, repo: Repository, pr_payload: dict[str, Any],
 ) -> PullRequest:
-    """
-    Find or create a PullRequest record from the webhook payload.
-
-    On 'synchronize' events (new commits pushed), we update the head_sha
-    so the analysis task knows which commit to review.
-    """
+    """Find or create a PullRequest record; update head_sha on synchronize."""
     github_id = pr_payload.get("id", 0)
     pr_number = pr_payload["number"]
     title = pr_payload.get("title", "Untitled PR")
@@ -118,20 +80,14 @@ async def _upsert_pull_request(
 
     if pr is None:
         pr = PullRequest(
-            github_id=github_id,
-            pr_number=pr_number,
-            title=title,
-            author_github_username=author,
-            head_sha=head_sha,
-            base_branch=base_branch,
-            head_branch=head_branch,
-            repo_id=repo.id,
+            github_id=github_id, pr_number=pr_number, title=title,
+            author_github_username=author, head_sha=head_sha,
+            base_branch=base_branch, head_branch=head_branch, repo_id=repo.id,
         )
         db.add(pr)
         await db.flush()
         logger.info(f"Created PullRequest #{pr_number} for {repo.full_name}")
     else:
-        # Update mutable fields on synchronize events
         pr.head_sha = head_sha
         pr.title = title
         await db.flush()
@@ -150,19 +106,13 @@ async def github_webhook(
     db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ):
-    """
-    Receive webhook events from GitHub.
-    Returns 202 Accepted immediately to prevent blocking GitHub.
-    """
+    """Receive webhook events from GitHub. Returns 202 immediately."""
     if not x_github_event or not x_github_delivery:
         raise HTTPException(status_code=400, detail="Missing GitHub headers")
 
-    # ── Idempotency check ─────────────────────────────────────────────────
-    # Redis SET NX (set-if-not-exists) with a 1 hour expiry.
-    # If the key already exists, we've already processed this delivery.
+    # Idempotency: SET NX with 1h expiry prevents duplicate processing
     idempotency_key = f"webhook_delivery:{x_github_delivery}"
     is_new = await redis.set(idempotency_key, "1", nx=True, ex=3600)
-
     if not is_new:
         logger.info(f"Duplicate webhook delivery {x_github_delivery}, skipping")
         return {"status": "duplicate", "message": "Already processed this delivery"}
@@ -172,26 +122,18 @@ async def github_webhook(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    # We only care about pull requests for PRScope
     if x_github_event == "pull_request":
         action = payload.get("action")
         if action in ["opened", "synchronize"]:
             pr_data = payload.get("pull_request", {})
             repo_data = payload.get("repository", {})
-            pr_url = pr_data.get("html_url", "unknown")
-            logger.info(f"Received webhook for PR {action}: {pr_url}")
+            logger.info(f"PR {action}: {pr_data.get('html_url', 'unknown')}")
 
-            # ── Upsert DB records ─────────────────────────────────────────
             repo = await _upsert_repository(db, repo_data)
             pr = await _upsert_pull_request(db, repo, pr_data)
-
-            # Commit the DB transaction so the worker can read these records
             await db.commit()
 
-            # ── Dispatch Celery task with real PR ID and commit SHA ────────
             analyze_pr_task.delay(str(pr.id), pr.head_sha)
-
             return {"status": "accepted", "message": "PR analysis queued", "pr_id": str(pr.id)}
 
-    # For any other event or unsupported PR action, just return 202
     return {"status": "ignored", "message": f"Event {x_github_event} ignored"}

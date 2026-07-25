@@ -1,41 +1,27 @@
-"""
-auth.py — Authentication endpoints.
+"""Authentication endpoints — register, login, refresh, logout, me."""
 
-POST /api/v1/auth/register  — create account, get tokens
-POST /api/v1/auth/login     — verify credentials, get tokens
-POST /api/v1/auth/refresh   — exchange refresh token for new access token
-POST /api/v1/auth/logout    — revoke refresh token
-GET  /api/v1/auth/me        — return current user (protected)
-"""
+import uuid
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_redis
 from app.core.security import create_access_token, create_refresh_token, decode_token
 from app.models.user import User
-from app.schemas.auth import (
-    LoginRequest,
-    MessageResponse,
-    RefreshRequest,
-    TokenResponse,
-)
+from app.schemas.auth import LoginRequest, MessageResponse, RefreshRequest, TokenResponse
 from app.schemas.user import UserCreate, UserRead
 from app.services.auth_service import (
-    authenticate_user,
-    register_user,
-    revoke_refresh_token,
-    store_refresh_token,
-    validate_refresh_token,
+    authenticate_user, register_user, revoke_refresh_token,
+    store_refresh_token, validate_refresh_token,
 )
 
 router = APIRouter(prefix="/auth")
 
 
 def _make_tokens(user: User) -> dict:
-    """Helper — generate access + refresh tokens for a user."""
     token_data = {"sub": str(user.id)}
     return {
         "access_token": create_access_token(token_data),
@@ -50,19 +36,12 @@ async def register(
     db: AsyncSession = Depends(get_db),
     redis_conn: aioredis.Redis = Depends(get_redis),
 ):
-    """
-    Create a new user account and return JWT tokens.
-
-    Returns 409 if the email is already registered.
-    """
+    """Create a new user account and return JWT tokens."""
     try:
         user = await register_user(db, user_data)
         await db.flush()
     except IntegrityError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     tokens = _make_tokens(user)
     await store_refresh_token(redis_conn, user.id, tokens["refresh_token"])
@@ -75,18 +54,10 @@ async def login(
     db: AsyncSession = Depends(get_db),
     redis_conn: aioredis.Redis = Depends(get_redis),
 ):
-    """
-    Verify email + password, return JWT tokens.
-
-    Returns 401 for invalid credentials. We don't say WHICH field is wrong
-    to prevent user enumeration (attacker learning which emails are registered).
-    """
+    """Verify email + password, return JWT tokens."""
     user = await authenticate_user(db, login_data.email, login_data.password)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     tokens = _make_tokens(user)
     await store_refresh_token(redis_conn, user.id, tokens["refresh_token"])
@@ -99,50 +70,25 @@ async def refresh(
     db: AsyncSession = Depends(get_db),
     redis_conn: aioredis.Redis = Depends(get_redis),
 ):
-    """
-    Exchange a valid refresh token for a new access + refresh token pair.
-
-    This is called when the access token expires. The client sends the
-    refresh token (stored securely) to get a new pair without re-entering
-    their password.
-    """
+    """Exchange a valid refresh token for a new access + refresh token pair."""
     try:
         payload = decode_token(refresh_data.refresh_token)
         if payload.get("type") != "refresh":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token type",
-            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
         user_id_str = payload.get("sub")
     except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
 
-    # Verify the token matches what's stored in Redis
-    import uuid
     user_id = uuid.UUID(user_id_str)
-    is_valid = await validate_refresh_token(
-        redis_conn, user_id, refresh_data.refresh_token
-    )
+    is_valid = await validate_refresh_token(redis_conn, user_id, refresh_data.refresh_token)
     if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token has been revoked",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token has been revoked")
 
-    # Fetch user to ensure they still exist and are active
-    from sqlalchemy import select
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
-    # Issue new token pair and replace the old refresh token in Redis
     tokens = _make_tokens(user)
     await store_refresh_token(redis_conn, user.id, tokens["refresh_token"])
     return tokens
@@ -153,22 +99,12 @@ async def logout(
     user: User = Depends(get_current_user),
     redis_conn: aioredis.Redis = Depends(get_redis),
 ):
-    """
-    Revoke the user's refresh token.
-
-    The access token will naturally expire (it's short-lived).
-    The refresh token is deleted from Redis so it can't be used again.
-    """
+    """Revoke the user's refresh token."""
     await revoke_refresh_token(redis_conn, user.id)
     return {"message": "Successfully logged out"}
 
 
 @router.get("/me", response_model=UserRead)
 async def me(user: User = Depends(get_current_user)):
-    """
-    Return the currently authenticated user.
-
-    This endpoint proves the JWT auth pipeline works end-to-end:
-    client sends Bearer token → deps.py decodes it → fetches user → returns it.
-    """
+    """Return the currently authenticated user."""
     return user
