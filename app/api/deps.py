@@ -1,14 +1,4 @@
-"""
-deps.py — Shared FastAPI dependencies.
-
-A "dependency" in FastAPI is a function that runs BEFORE your route handler,
-and whose return value gets injected into it via `Depends(...)`.
-
-Dependencies:
-  - get_db() — yields a database session per request
-  - get_redis() — yields a Redis connection per request
-  - get_current_user() — extracts and validates JWT, returns the User
-"""
+"""Shared FastAPI dependencies — DB session, Redis, and auth."""
 
 import uuid
 from collections.abc import AsyncGenerator
@@ -25,17 +15,11 @@ from app.core.security import decode_token
 from app.database import AsyncSessionLocal
 from app.models.user import User
 
-# OAuth2PasswordBearer tells FastAPI/Swagger that endpoints expect a
-# Bearer token in the Authorization header. The tokenUrl points to
-# the login endpoint for Swagger's "Authorize" button.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Yields a database session scoped to exactly one HTTP request.
-    Commits on success, rolls back on exception.
-    """
+    """Yields a DB session scoped to one HTTP request."""
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -46,11 +30,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def get_redis() -> AsyncGenerator[aioredis.Redis, None]:
-    """
-    Yields a Redis connection scoped to one request.
-
-    Using decode_responses=True so we get strings back, not bytes.
-    """
+    """Yields a Redis connection scoped to one request."""
     r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     try:
         yield r
@@ -62,21 +42,7 @@ async def get_current_user(
     token: str | None = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """
-    Extract the JWT from the Authorization header, decode it, and
-    fetch the corresponding user from the database.
-
-    This is the dependency that makes an endpoint "protected":
-      @router.get("/me")
-      async def me(user: User = Depends(get_current_user)):
-          return user
-
-    Raises 401 if:
-      - No token provided
-      - Token is expired or invalid
-      - Token type is not "access"
-      - User doesn't exist or is inactive
-    """
+    """Extract JWT, decode it, and return the authenticated User."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
