@@ -1,13 +1,4 @@
-"""
-user.py — The User table.
-
-The first real domain model in PRScope. Represents an account that can
-log in (Week 1, Day 5-6) and later connect GitHub repositories (Day 7).
-
-Supports two auth methods:
-  1. Email + password (traditional registration)
-  2. GitHub OAuth (no password — hashed_password is empty string)
-"""
+"""User model — email/password auth + GitHub OAuth."""
 
 import uuid
 
@@ -23,9 +14,7 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
     )
     email: Mapped[str] = mapped_column(
         String(255), unique=True, index=True, nullable=False
@@ -36,21 +25,18 @@ class User(Base, TimestampMixin):
     github_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    # ── GitHub OAuth fields (Day 7) ──────────────────────────────────────────
+    # GitHub OAuth
     github_id: Mapped[int | None] = mapped_column(
         BigInteger, unique=True, nullable=True, index=True
     )
     github_access_token: Mapped[str | None] = mapped_column(
-        Text, nullable=True
-        # Stored ENCRYPTED via app/core/encryption.py — never plain text
+        Text, nullable=True  # Stored encrypted via app/core/encryption.py
     )
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    # ── Relationships ────────────────────────────────────────────────────────
+    # Relationships
     repositories: Mapped[list["Repository"]] = relationship(  # noqa: F821
-        back_populates="owner",
-        lazy="selectin",
-        cascade="all, delete-orphan",
+        back_populates="owner", lazy="selectin", cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
