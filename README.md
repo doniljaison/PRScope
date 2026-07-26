@@ -1,4 +1,4 @@
-# PRScope 🔍
+# PRScope
 
 [![CI](https://github.com/doniljaison/PRScope/actions/workflows/ci.yml/badge.svg)](https://github.com/doniljaison/PRScope/actions/workflows/ci.yml)
 ![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)
@@ -100,8 +100,7 @@ PRScope/
 ├── render.yaml                     # One-click Render deployment
 ├── .github/workflows/ci.yml       # GitHub Actions CI
 ├── SYSTEM_DESIGN.md                # Architecture decisions
-├── BUGS.md                         # Bug journal with solutions
-└── everyday_documentation/         # Daily progress reports
+└── everyday_documentation/         # Daily development reports
 ```
 
 ---
@@ -209,6 +208,6 @@ Key highlights:
 
 ---
 
-## BUGS.md
+## Development Journal
 
-See [BUGS.md](./BUGS.md) — a journal of hard bugs encountered and how they were fixed.
+See [everyday_documentation/](./everyday_documentation/) for daily progress reports covering architecture decisions, bugs encountered, and lessons learned throughout the 30-day build.
